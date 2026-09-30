@@ -1,2 +1,171 @@
-# open-source-install-guidelines
-How to install OpenLane flow
+# Open Source Installation guidelines
+
+This Installation guideline will allow you to use analog design, digital design and verification tools seamlessly by using nix shell, which would allow u use any tool under a same directory.
+
+> [!NOTE]
+> Nix-shell is a command provided by the Nix package manager that provisions a transient, isolated, and strictly reproducible development environment without modifying your global operating system.
+
+> [!NOTE] 
+> Instead of installing packages into `/usr/bin`, `/usr/local/lib`, or system-wide package registries, Nix fetches or builds the exact dependencies specified in an expression (like `shell.nix` or `flake.nix`), places them under cryptographic hashes in `/nix/store`, and spawns an ephemeral subshell with environment variables (`PATH`, `LD_LIBRARY_PATH`, `PYTHONPATH`) configured to point to them.
+
+The open-source EDA (Electronic Design Automation) ecosystem spanning synthesizers (Yosys), place-and-route engines (nextpnr, OpenROAD), timing analyzers (OpenSTA), simulators (Verilator, Icarus), and PDK tooling (Magic, KLayout, Netgen)—has notoriously painful dependency matrices. Nix has become the best environment manager in this space (adopted heavily by projects like OpenROAD, Libre-SOC, and F4PGA) because it eliminates dependency hell and Bit-for-Bit determinism across compute environments.
+
+The tools we will be going to install are listed [here](tools.md).
+
+## Important
+> [!IMPORTANT]
+> Before any installation please go through the [requirements](requirements.md) and verify if your device meets the requirements.
+
+## Let's Install Nix first.
+
+1. We will be using curl to fetch the official installer
+   ```
+   sudo apt-get install -y curl
+   ```
+2. This script installs Nix and automatically configures the required LibreLane binary caches and experimental features (flakes).
+   ```
+   curl --proto '=https' --tlsv1.2 -fsSL https://artifacts.nixos.org/nix-installer | sh -s -- install --no-confirm --extra-conf "    extra-substituters = https://nix-cache.fossi-foundation.org    extra-trusted-public-keys = nix-cache.fossi-foundation.org:3+K59iFwXqKsL7BNu6Guy0v+uTlwsxYQxjspXzqLYQs=    extra-experimental-features = nix-command flakes"
+   ```
+3. **CRITICAL:** _Close your current terminal completely_ and _open a new one_.
+   To test if nix is installed try executing this,
+   ```
+   nix --version
+   ```
+
+   The expected output should be like this
+   ```
+   [keval@archlinux ~]$ nix --version
+   nix (Nix) 2.35.1
+   ```
+4. Make a folder in your home directory where you want to store your projects and `cd` to navigate into that foldere
+   ```
+   mkdir your_folder_name
+   cd your_folder_name
+   ```
+5. In `your_folder_name` make a file named `flake.nix`
+   ```
+   touch flake.nix
+   ```
+
+   Using any text editor write this code into the `flake.nix` file. One approach is to use nano
+   ```
+   nano flake.nix
+   ```
+
+   after `nano flake.nix` copy the following code and paste it once nano text editor window opens up, paste it while pressing `Ctrl+Shift+V` in nano
+```
+{
+  description = "Complete Open-Source Silicon & FPGA Environment";
+
+  nixConfig = {
+    extra-substituters = [
+      "https://nix-cache.fossi-foundation.org"
+    ];
+    extra-trusted-public-keys = [
+      "nix-cache.fossi-foundation.org:3+K59iFwXqKsL7BNu6Guy0v+uTlwsxYQxjspXzqLYQs="
+    ];
+  };
+
+  inputs = {
+    nix-eda.url = "github:fossi-foundation/nix-eda/7.4.0";
+    librelane = {
+      url = "github:librelane/librelane/dev";
+      inputs.nix-eda.follows = "nix-eda";
+    };
+  };
+
+  outputs = { self, librelane, nix-eda, ... }: let
+    devshell = librelane.inputs.devshell;
+    nixpkgs = nix-eda.inputs.nixpkgs;
+  in {
+    legacyPackages = nix-eda.forAllSystems (system:
+      import nixpkgs {
+        inherit system;
+        overlays = [
+          nix-eda.overlays.default
+          devshell.overlays.default
+          librelane.overlays.default
+        ];
+      }
+    );
+
+    packages = nix-eda.forAllSystems (system: {
+      inherit (self.legacyPackages.${system}.python3.pkgs);
+    });
+
+    devShells = nix-eda.forAllSystems (system: let
+      pkgs = self.legacyPackages.${system};
+    in {
+      default = pkgs.librelane-shell.override {
+        extra-packages = with pkgs; [
+          # Simulation
+          iverilog
+          verilator
+          gtkwave
+
+          # FPGA prototyping
+          nextpnr
+          icestorm
+          trellis
+          openfpgaloader
+          
+          # Analog & Layout
+          xschem
+          xterm
+          ngspice
+          klayout
+          magic
+          netgen
+          openvaf-r
+        ];
+
+        extra-python-packages = ps: with ps; (
+          pkgs.lib.optionals (pkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform cocotb) [ cocotb ]
+        );
+      };
+    });
+  };
+}
+```
+
+6. same as `flake.nix` make `shell.nix`
+   ```
+   touch shell.nix
+   ```
+   
+   And paste this code into `shell.nix`
+```
+let
+  # Automatically fetch the flake compatibility bridge
+  flake-compat = import (fetchTarball "https://github.com/edolstra/flake-compat/archive/master.tar.gz") {
+    src = ./.;
+  };
+in
+  # Expose the default development shell from flake.nix
+  flake-compat.shellNix
+```
+
+> [!NOTE]
+> `flake.nix` is the modern blueprint and source of truth for your environment, while `shell.nix` serves as a backward-compatibility bridge for older commands.
+
+7. Now you are ready to go, let's launch your nix-shell.
+   ``` 
+   nix-shell
+   ```
+   It will take a while to open because it will be installing all the tools required and after it installs a text will pop up like this,
+   ```
+   [nix-shell:~/your_folder_name]$
+   ```
+   Also after first time executing `nix-shell` it generates `flake.lock` which is completely safe to commit or ignore.
+   
+8. To test if installation is complete will do a smoke test
+   ```
+   librelane --smoke-test
+   ```
+   This will look really cool and at the end of the execution the output should be like this,
+   ```
+   [18:43:05] INFO     Smoke test passed. 
+   ```
+
+Now you can run your designs and test them.
+Happy Hacking!
