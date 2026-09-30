@@ -171,4 +171,5 @@ Now you can run your designs and test them.
 Happy Hacking!
 
 > [!TIP]
-> If you are running out of storage in your device you can remove tools which are cached, LibreLane tools are just sitting dormant in your `/nix/store` cache taking up disk space. run the Nix garbage collector to completely wipe tools from your drive by executing `nix-collect-garbage -d`
+> If you are running out of storage in your device you can remove tools which are cached, LibreLane tools are just sitting dormant in your `/nix/store` cache taking up disk space. run the Nix garbage collector to completely wipe tools from your drive (you can install them again by running nix-shell where you have stored flake and shell) by executing
+> `nix-collect-garbage -d`
