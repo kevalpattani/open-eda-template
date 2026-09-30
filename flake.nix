@@ -53,7 +53,7 @@
           trellis
           openfpgaloader
           
-          # Analog & Layout
+          # Extra Analog & Layout
           xschem
           xterm
           ngspice
